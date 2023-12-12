@@ -1,0 +1,177 @@
+---
+title: "Mini Lab 2"
+output: html_document
+date: "2023-11-17"
+---
+**Description:**
+Mini Lab 2 code
+
+```{r setup, include=FALSE}
+
+# User-defined function to read in PCIbex Farm results files
+read.pcibex <- function(filepath, auto.colnames=TRUE, fun.col=function(col,cols){cols[cols==col]<-paste(col,"Ibex",sep=".");return(cols)}) {
+  n.cols <- max(count.fields(filepath,sep=",",quote=NULL),na.rm=TRUE)
+  if (auto.colnames){
+    cols <- c()
+    con <- file(filepath, "r")
+    while ( TRUE ) {
+      line <- readLines(con, n = 1, warn=FALSE)
+      if ( length(line) == 0) {
+        break
+      }
+      m <- regmatches(line,regexec("^# (\\d+)\\. (.+)\\.$",line))[[1]]
+      if (length(m) == 3) {
+        index <- as.numeric(m[2])
+        value <- m[3]
+        if (is.function(fun.col)){
+         cols <- fun.col(value,cols)
+        }
+        cols[index] <- value
+        if (index == n.cols){
+          break
+        }
+      }
+    }
+    close(con)
+    return(read.csv(filepath, comment.char="#", header=FALSE, col.names=cols))
+  }
+  else{
+    return(read.csv(filepath, comment.char="#", header=FALSE, col.names=seq(1:n.cols)))
+  }
+}
+
+
+
+# Read in results file
+results <- read.pcibex("ML2_raw.csv")
+
+write.csv(results, "ML2_clean.csv")
+
+```
+
+``` {r}
+suppressPackageStartupMessages(library(tidyverse))
+library(MASS)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(lme4)
+
+#used google sheets to filter cleaned data down to the responses for experimental items and fillers, and add columns corresponding to the variables required for Mini Lab 2
+
+data1 <- read_csv('ML2_filtered_data.csv',show_col_types = FALSE)
+
+#get only experimental items
+experimental_data<-dplyr::select(data1, itemType, response, itemNo, sid, condition, voice.cl1, voice.cl2, ellipsis, fillerType, mismatch, voice.ellipsis) %>%
+  filter(itemType=="experimental")
+
+#get means by item type
+ellipsis.means<-experimental_data %>%
+  filter(ellipsis=="TRUE") %>%
+  group_by(condition) %>%
+  summarize(mean=mean(response))
+
+no.ellipsis.means<-experimental_data %>%
+  filter(ellipsis=="FALSE") %>%
+  group_by(condition) %>%
+  summarize(mean=mean(response))
+
+#get only filler items
+filler_data<-dplyr::select(data1, itemType, response, itemNo, sid, condition, voice.cl1, voice.cl2, ellipsis, fillerType, mismatch, voice.ellipsis) %>%
+  filter(itemType=="filler") 
+filler_mean=mean(filler_data$response)
+
+#for the mini lab: just run the appropriate t-tests (justify selection of paired t-test: data is not independent!)
+
+#get vectors for responses by condition - ELLIPSIS
+df1 <- experimental_data %>%
+  filter(itemType=="experimental", ellipsis=="TRUE") %>%
+  dplyr::select(response, condition, voice.ellipsis, mismatch) 
+df1
+
+AA.ellipsis <- df1 %>% 
+  filter(condition=="[A → A]") 
+AA.ellipsis.responses=AA.ellipsis$response
+AP.ellipsis <- df1 %>% 
+  filter(condition=="[A → P]")
+AP.ellipsis.responses=AP.ellipsis$response
+PP.ellipsis <- df1 %>% 
+  filter(condition=="[P → P]")
+PP.ellipsis.responses=PP.ellipsis$response
+PA.ellipsis <- df1 %>% 
+  filter(condition=="[P → A]") 
+PA.ellipsis.responses=PA.ellipsis$response
+
+#compare: PP to AP
+test1<-t.test(PP.ellipsis.responses, AP.ellipsis.responses, paired=TRUE)
+test1 #significantly different!
+
+#compare: AA to PA
+test2<-t.test(AA.ellipsis.responses, PA.ellipsis.responses, paired=TRUE)
+test2 #significantly different!
+
+#repeat for NO ELLIPSIS
+df2 <- experimental_data %>%
+  filter(itemType=="experimental", ellipsis=="FALSE") %>%
+  dplyr::select(response, condition, voice.cl2, mismatch) 
+df2
+
+AA.no.ellipsis <- df2 %>% 
+  filter(condition=="[A → A]") 
+AA.no.ellipsis.responses=AA.no.ellipsis$response
+AP.no.ellipsis <- df2 %>% 
+  filter(condition=="[A → P]")
+AP.no.ellipsis.responses=AP.no.ellipsis$response
+PP.no.ellipsis <- df2 %>% 
+  filter(condition=="[P → P]")
+PP.no.ellipsis.responses=PP.no.ellipsis$response
+PA.no.ellipsis <- df2 %>% 
+  filter(condition=="[P → A]") 
+PA.no.ellipsis.responses=PA.no.ellipsis$response
+
+#compare: PP to AP
+test3<-t.test(PP.no.ellipsis.responses, AP.no.ellipsis.responses, paired=TRUE)
+test3 #not significantly different!
+
+#compare: AA to PA
+test4<-t.test(AA.no.ellipsis.responses, PA.no.ellipsis.responses, paired=TRUE)
+test4 #not significantly different!
+
+#plot means for visual, with error bars 
+ellipsis.sum <- df1 %>%
+  group_by(condition) %>%
+  summarise( 
+    n=n(),
+    mean=mean(response),
+    sd=sd(response),
+    deg.freedom=n-1
+  ) %>%
+  mutate( se=sd/sqrt(n))  %>%
+  mutate(critical.t = qt(0.975,df=deg.freedom))
+
+plot1<-ggplot(data=ellipsis.sum, aes(x=condition, y=mean)) +
+  ggtitle("Mean ratings by condition for ellipsis items") +
+  labs(x="condition", y="mean rating") +
+  geom_bar(stat="identity") +
+  geom_errorbar( aes(x=condition, ymin=mean-critical.t*se, ymax=mean+critical.t*se), width=0.4, alpha=0.9) 
+print(plot1)
+
+no.ellipsis.sum <- df2 %>%
+  group_by(condition) %>%
+  summarise( 
+    n=n(),
+    mean=mean(response),
+    sd=sd(response),
+    deg.freedom=n-1
+  ) %>%
+  mutate( se=sd/sqrt(n))  %>%
+  mutate(critical.t = qt(0.975,df=deg.freedom))
+
+plot2<-ggplot(data=no.ellipsis.sum, aes(x=condition, y=mean)) +
+  ggtitle("Mean ratings by condition for no ellipsis items") +
+  labs(x="condition", y="mean rating") +
+  geom_bar(stat="identity") +
+  geom_errorbar( aes(x=condition, ymin=mean-critical.t*se, ymax=mean+critical.t*se), width=0.4, alpha=0.9) 
+print(plot2)
+
+```
